@@ -41,7 +41,7 @@ Parameter file `AIO.json` have to be exist in root directory:
 ```
 - get/list existing stack
 ```
-./provision.sh update
+./provision.sh get
 ```
 - delete/terminate existing stack
 ```
