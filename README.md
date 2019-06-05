@@ -4,13 +4,56 @@
 - SNS event should be dispatched once the data has been stored
 
 # Architecture:
-## Option 1
-POST request with json payload in the 'body' -> AWS API GW -> Lambda Function-> DynamoDB or S3 persistent -> SNS event (after success)
-- dealing with escape character json->string during api gw to lambda [4]
+POST request with json payload in the 'body' -> AWS API GW -> DynamoDB Stream-> Lambda -> SNS event (email)
 
-## Option 2
-POST request with json payload in the 'body' -> AWS API GW -> DynamoDB or S3 persistent -> SNS event (after success)
-- implement peristsent mapping to dynamodb (optional DynamoDB Streaming) without Lambda in the middle
+Cons: implement persistent mapping to dynamodb without Lambda in the middle
+
+# Implementation
+
+## Script Usage
+Script will require: `bash, awscli, jq`
+
+Parameter file `AIO.json` have to be exist in root directory:
+```json
+[
+  {
+    "ParameterKey": "SNSEndpoint",
+    "ParameterValue": "your@gmail.com"
+  }
+]
+```
+
+
+
+- get all possible actions
+```
+./provision.sh
+```
+>Required action: create | update | get | delete
+
+- create new stack
+```
+./provision.sh create
+```
+- update existing stack
+```
+./provision.sh update
+```
+- get/list existing stack
+```
+./provision.sh update
+```
+- delete/terminate existing stack
+```
+./provision.sh delete
+```
+
+**After `create`, `update` and `get` actions you will receive 'Important information..' - notification that endpoint need to be confirmed and curl query for testing expected functionality**
+
+## CloudFormation Usage
+1. Go to [CloudFormation console](https://console.aws.amazon.com/cloudformation)
+2. Create stack based on file `template.yaml`
+3. Check Output section once stack has been created
 
 ## Resources:
 1. [API GW + Lambda + DynamoDB](https://docs.aws.amazon.com/lambda/latest/dg/with-on-demand-https-example.html)

@@ -1,0 +1,276 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: json payload example
+Parameters:
+  TableName:
+    Description:                                 'Table name for json payload'
+    Type:                                        String
+    Default:                                     'AIOdb'
+  MethodPath:
+    Type:                                       String
+    Default:                                    'load'
+  StageName:
+    Type:                                       String
+    Default:                                    'Test'
+  SNSProtocol:
+    Type:                                       String
+    Default:                                    email
+  SNSEndpoint:
+    Type:                                       String
+    Default:                                    'required_valid@email.com'
+
+Resources:
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      StreamSpecification: #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-dynamodb-streamspecification.html
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+        - AttributeName: "RequestId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "RequestId"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: "5"
+        WriteCapacityUnits: "5"
+
+
+  API:
+    Type: AWS::ApiGateway::RestApi
+    Description: 'JSON payload api'
+    Properties:
+      EndpointConfiguration:
+        Types:
+          - 'REGIONAL'
+      Name: !Sub '${AWS::StackName}-api'
+
+  LoadResource:
+    Type: 'AWS::ApiGateway::Resource'
+    DependsOn:
+      - API
+    Properties:
+      RestApiId: !Ref API
+      ParentId: !GetAtt
+        - API
+        - RootResourceId
+      PathPart: !Ref MethodPath
+
+  RoleForUpdatingDynamoDBandCloudWatch:
+    Type: AWS::IAM::Role
+    Description: Role for accessing to DynamoDB and CloudWatch
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow #allow lambda to assume this role
+          Principal:
+            Service:
+            - dynamodb.amazonaws.com
+            - cloudwatch.amazonaws.com
+            - apigateway.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: ApiGwRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow #allow to write logs to cloudwatch
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+            - Effect: Allow #allow lambda to read from the event stream
+              Action:
+              - dynamodb:PutItem
+              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}'
+
+  RoleForSendingNotificationViaSNS:
+    Type: AWS::IAM::Role
+    Description: Role for accessing to SNS
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow #allow lambda to assume this role
+          Principal:
+            Service:
+            - sns.amazonaws.com
+            - lambda.amazonaws.com
+
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: LambdaRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow #allow to write logs to cloudwatch
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:log-stream:*'
+                #arn:aws:logs:*:*:*
+            - Effect: Allow # allow lambda to publish
+              Action:
+              - SNS:Publish
+              Resource: !Sub
+                - 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${SNSTopicName}'
+                -
+                  SNSTopicName: !GetAtt
+                    - SNStopicDynamoDBupdates
+                    - TopicName
+
+            - Effect: Allow #allow lambda to read from the event stream
+              Action:
+              - dynamodb:DescribeStream
+              - dynamodb:GetRecords
+              - dynamodb:GetShardIterator
+              - dynamodb:ListStreams
+              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/stream/*'
+
+
+  PayloadPostMethod:
+    Type: AWS::ApiGateway::Method
+    DependsOn:
+      - LoadResource
+      - DynamoDBTable
+      - RoleForUpdatingDynamoDBandCloudWatch
+    Properties:
+      OperationName: PayloadJson
+      HttpMethod: POST
+      ResourceId: !Ref LoadResource
+      RestApiId: !Ref API
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        Credentials: !GetAtt
+          - RoleForUpdatingDynamoDBandCloudWatch
+          - Arn
+          # !Sub 'arn:aws:iam::${AWS::AccountId}:role/service-role/LoadJSON-role-pjihtfz5'
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:dynamodb:action/PutItem'
+        IntegrationHttpMethod: "POST"
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates:
+          application/json:
+            !Sub |
+              {
+                  "TableName": "${TableName}",
+                  "Item": {
+              	     "RequestId": {
+                         "S": "$context.requestId"
+                          },
+                      "name": {
+                          "S": "$input.path('$.name')"
+                          },
+                      "email": {
+                          "S": "$input.path('$.email')"
+                      },
+                      "message": {
+                          "S": "$input.path('$.message')"
+                      }
+                  }
+              }
+        IntegrationResponses:
+          - StatusCode: 200
+            #ContentHandling: String
+            #ResponseParameters:
+            #  Key : Value
+            ResponseTemplates:
+              application/json: ''
+            #    !Sub |
+            #      {
+            #        "status": "OK"
+            #      }
+            #SelectionPattern: String
+      MethodResponses:
+          - StatusCode: 200
+            ResponseModels: { "application/json": "Empty" }
+  ApiDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - PayloadPostMethod
+    Properties:
+      RestApiId: !Ref API
+      Description: "API Deployment"
+      StageName: !Ref StageName
+
+  NotifyChangesAtDB:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "index.handler"
+      Role: !GetAtt
+        - RoleForSendingNotificationViaSNS
+        - Arn
+        #arn:aws:iam::427913134647:role/service-role/Notify-Table-New-Record-role-vi46asb9
+      Runtime: "nodejs8.10"
+      Code:
+        ZipFile: !Sub |
+          console.log('Loading function');
+          var AWS = require("aws-sdk");
+
+          exports.handler = function(event, context) {
+              //console.log('Received event:', JSON.stringify(event, null, 2));
+              for (const record of event.Records) {
+                  console.log(record.eventID);
+                  console.log(record.eventName);
+                  console.log('DynamoDB Record: %j', record.dynamodb);
+              };
+              //var message = event.Records[0].Sns.Message;
+              var eventText = JSON.stringify(event, null, 2);
+              console.log("Received event:", eventText);
+              var sns = new AWS.SNS();
+              var params = {
+                  Message: eventText,
+                  Subject: "${AWS::StackName} | updated table ${TableName} at stage ${StageName} by method ${MethodPath}",
+                  TopicArn: "${SNStopicDynamoDBupdates}"
+              };
+              sns.publish(params, context.done);
+
+              return `Successfully processed XX records.`;
+          };
+#XX = ${event.Records.length}
+
+  SNStopicDynamoDBupdates:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      DisplayName: DynamoDBupdates
+      Subscription:
+        - Endpoint: !Ref SNSEndpoint
+          Protocol: !Ref SNSProtocol
+
+  DynamoDBStreamTriggerToLambda:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      Enabled: True
+      EventSourceArn: !GetAtt #trigger event from the data table
+        - DynamoDBTable
+        - StreamArn
+      FunctionName: !GetAtt #trigger the echo function previously defined
+        - NotifyChangesAtDB
+        - Arn
+      StartingPosition: LATEST #always start at the tail of the stream
+
+Outputs:
+  ApiTestCommandToExecute:
+    Export:
+      Name:  ApiTestCommandToExecute
+    Description: Run this command to verify functionality
+    Value:
+      !Sub >-
+        curl -X POST -H "Content-Type: application/json"
+        -d '{"name": "John", "email": "john@wick.com", "message": "Test message"}'
+        https://${API}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/${MethodPath}
+
+  SNSRequiredAction:
+    Export:
+      Name:  SNSRequiredAction
+    Description: Otherwise you will not receive notifications
+    Value: !Sub 'Ensure, that you confirm subscription at ${SNSProtocol} / ${SNSEndpoint} for topic: ${SNStopicDynamoDBupdates}'
