@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: json payload example
+
 Parameters:
   TableName:
     Description:                                 'Table name for json payload'
@@ -19,7 +20,6 @@ Parameters:
     Default:                                    'required_valid@email.com'
 
 Resources:
-
   DynamoDBTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -35,7 +35,6 @@ Resources:
       ProvisionedThroughput:
         ReadCapacityUnits: "5"
         WriteCapacityUnits: "5"
-
 
   API:
     Type: AWS::ApiGateway::RestApi
@@ -64,7 +63,7 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-        - Effect: Allow #allow lambda to assume this role
+        - Effect: Allow
           Principal:
             Service:
             - dynamodb.amazonaws.com
@@ -78,13 +77,13 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-            - Effect: Allow #allow to write logs to cloudwatch
+            - Effect: Allow 
               Action:
               - logs:CreateLogGroup
               - logs:CreateLogStream
               - logs:PutLogEvents
               Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
-            - Effect: Allow #allow lambda to read from the event stream
+            - Effect: Allow
               Action:
               - dynamodb:PutItem
               Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}'
@@ -96,7 +95,7 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-        - Effect: Allow #allow lambda to assume this role
+        - Effect: Allow
           Principal:
             Service:
             - sns.amazonaws.com
@@ -110,14 +109,13 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-            - Effect: Allow #allow to write logs to cloudwatch
+            - Effect: Allow
               Action:
               - logs:CreateLogGroup
               - logs:CreateLogStream
               - logs:PutLogEvents
               Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:log-stream:*'
-                #arn:aws:logs:*:*:*
-            - Effect: Allow # allow lambda to publish
+            - Effect: Allow
               Action:
               - SNS:Publish
               Resource: !Sub
@@ -127,14 +125,13 @@ Resources:
                     - SNStopicDynamoDBupdates
                     - TopicName
 
-            - Effect: Allow #allow lambda to read from the event stream
+            - Effect: Allow
               Action:
               - dynamodb:DescribeStream
               - dynamodb:GetRecords
               - dynamodb:GetShardIterator
               - dynamodb:ListStreams
               Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/stream/*'
-
 
   PayloadPostMethod:
     Type: AWS::ApiGateway::Method
@@ -153,7 +150,6 @@ Resources:
         Credentials: !GetAtt
           - RoleForUpdatingDynamoDBandCloudWatch
           - Arn
-          # !Sub 'arn:aws:iam::${AWS::AccountId}:role/service-role/LoadJSON-role-pjihtfz5'
         Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:dynamodb:action/PutItem'
         IntegrationHttpMethod: "POST"
         PassthroughBehavior: WHEN_NO_TEMPLATES
@@ -179,19 +175,12 @@ Resources:
               }
         IntegrationResponses:
           - StatusCode: 200
-            #ContentHandling: String
-            #ResponseParameters:
-            #  Key : Value
             ResponseTemplates:
               application/json: ''
-            #    !Sub |
-            #      {
-            #        "status": "OK"
-            #      }
-            #SelectionPattern: String
       MethodResponses:
           - StatusCode: 200
             ResponseModels: { "application/json": "Empty" }
+            
   ApiDeployment:
     Type: "AWS::ApiGateway::Deployment"
     DependsOn:
@@ -208,13 +197,12 @@ Resources:
       Role: !GetAtt
         - RoleForSendingNotificationViaSNS
         - Arn
-        #arn:aws:iam::427913134647:role/service-role/Notify-Table-New-Record-role-vi46asb9
       Runtime: "nodejs8.10"
       Code:
         ZipFile: !Sub |
           console.log('Loading function');
           var AWS = require("aws-sdk");
-
+          
           exports.handler = function(event, context) {
               //console.log('Received event:', JSON.stringify(event, null, 2));
               for (const record of event.Records) {
@@ -250,13 +238,13 @@ Resources:
     Properties:
       BatchSize: 1
       Enabled: True
-      EventSourceArn: !GetAtt #trigger event from the data table
+      EventSourceArn: !GetAtt
         - DynamoDBTable
         - StreamArn
-      FunctionName: !GetAtt #trigger the echo function previously defined
+      FunctionName: !GetAtt
         - NotifyChangesAtDB
         - Arn
-      StartingPosition: LATEST #always start at the tail of the stream
+      StartingPosition: LATEST
 
 Outputs:
   ApiTestCommandToExecute:
