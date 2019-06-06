@@ -6,12 +6,12 @@
 # Architecture:
 POST request with json payload in the 'body' -> AWS API GW -> DynamoDB Stream-> Lambda -> SNS event (email)
 
-Cons: implement persistent mapping to dynamodb without Lambda in the middle
+Pros: implement persistent mapping to dynamodb without Lambda in the middle
 
 # Implementation
 
 ## Script Usage
-Script will require: `bash, awscli, jq`
+Script will require you to have: `bash, awscli, jq`
 
 Parameter file `AIO.json` have to be exist in root directory:
 ```json
@@ -22,8 +22,6 @@ Parameter file `AIO.json` have to be exist in root directory:
   }
 ]
 ```
-
-
 
 - get all possible actions
 ```
